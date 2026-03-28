@@ -20,19 +20,16 @@ Microphone
     ▼
 ┌───────────────────────────────┐
 │   Whisper STT (OpenAI API)    │  Audio → Text
-│   Encoder-Decoder             │
 └──────────────┬────────────────┘
                │
                ▼
 ┌───────────────────────────────┐
 │   Claude (Anthropic API)      │  Text → Text (Streaming via SSE)
-│   Decoder-Only                │
 └──────────────┬────────────────┘
                │  sentence by sentence
                ▼
 ┌───────────────────────────────┐
 │   TTS (OpenAI API)            │  Text → Audio → Playback
-│   Encoder-Decoder             │
 └───────────────────────────────┘
 ```
 
@@ -43,11 +40,13 @@ Microphone
 | Feature | Description |
 |---|---|
 | Streaming responses | Claude streams token by token; TTS fires per sentence |
+| Automatic mic calibration | Measures ambient noise before each turn, adapts silence threshold dynamically |
 | Silence detection | Two-phase state machine — waits for speech, then stops after configurable silence |
 | Leading silence trimming | Only speech audio is sent to Whisper, preventing hallucinations on empty input |
 | Conversation memory | Full conversation history is passed to Claude for follow-up questions |
 | Audio logging | Each turn is saved as numbered WAV files (`001_user.wav`, `001_agent.wav`) |
 | Pipeline timing | STT, LLM+TTS, and total latency measured per turn |
+| Verbose debug mode | `VERBOSE = True` in main.py reveals calibration values, file paths, stop-word checks |
 
 ---
 
@@ -55,9 +54,12 @@ Microphone
 
 ```
 realtime-voice-agent/
-├── agent_pipeline.py       # Main pipeline: record → transcribe → stream → speak
+├── stt.py                  # Speech-to-Text (recording + Whisper)
+├── tts.py                  # Text-to-Speech (OpenAI TTS)
+├── agent.py                # Claude streaming (text only, no audio)
+├── main.py                 # CLI voice loop (orchestrates stt, tts, agent)
 ├── config.py               # All model settings, audio parameters, prompts
-├── cleanup.py              # Utility: deletes all WAV files from recordings/ and outputs/
+├── cleanup.py              # Utility: deletes all WAV files
 ├── requirements.txt
 ├── .env                    # API keys (not tracked)
 ├── .env_example            # Template for .env
@@ -67,6 +69,8 @@ realtime-voice-agent/
 └── outputs/                # Agent audio (per-turn WAV files)
     └── .gitkeep
 ```
+
+Each pipeline step is a standalone module that can be tested independently.
 
 ---
 
@@ -104,16 +108,102 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### Usage
+---
+
+## Usage
+
+### Full Voice Agent
 
 ```bash
-python agent_pipeline.py
+python main.py
 ```
 
 Speak into your microphone. The agent responds via audio. Say "stop" or "ende" to end the conversation.
 
+Expected output:
+
+```
+═══════════════════════════════════════
+  Voice Agent
+  Sage 'stop' oder 'ende' zum Beenden
+═══════════════════════════════════════
+
+🎤 Bitte sprechen...
+Du:     Erzähle mir eine Geschichte über eine kosmische Eule.
+
+Agent:
+  Im weiten Universum lebte eine magische Eule namens Stella...
+  Sie flog zwischen den Galaxien umher und sammelte Träume...
+  Eines Nachts entdeckte sie einen einsamen Asteroiden...
+
+  ⏱ STT: 1.5s | LLM+TTS: 34.3s | Total: 35.8s
+
+🎤 Bitte sprechen...
+Du:     Ende.
+
+👋 Tschüss!
+Gespräch beendet. 1 Austausche.
+```
+
+Set `VERBOSE = True` in main.py to see debug details (calibration values, file paths, stop-word matching).
+
+### Test Individual Pipeline Steps
+
+Each module runs standalone for isolated testing:
+
+**Speech-to-Text only** — records from microphone, transcribes, prints text:
+
 ```bash
-# Clean up recorded audio files
+python stt.py
+```
+
+```
+=== STT Test ===
+
+  ⚙ max 20s, Stille-Timeout 2s
+  ⚙ Kalibriere Mikrofon... Ambient: 0.0141, Threshold: 0.0281
+🎤 Bitte sprechen...
+  ⚙ Stille erkannt nach 5.2s
+  ⚙ Gespeichert: ./recordings/999_user.wav
+
+Transkription: Das ist ein Test.
+```
+
+Note: stt.py runs with `verbose=True` by default for debugging.
+
+**Text-to-Speech only** — generates and plays a test sentence:
+
+```bash
+python tts.py
+```
+
+```
+=== TTS Test ===
+
+Generiere Audio...
+Fertig.
+```
+
+You should hear "Hallo, ich bin der Voice Agent. Das ist ein Test." through your speakers.
+
+**Claude streaming only** — text chat in the terminal, no audio:
+
+```bash
+python agent.py
+```
+
+```
+=== Agent Test: Text-Chat mit Claude ===
+Tippe 'quit' zum Beenden.
+
+Du: Was ist Python?
+Agent: Python ist eine vielseitige Programmiersprache. Sie wird häufig in der Webentwicklung und Datenanalyse eingesetzt. Besonders beliebt ist sie auch im Bereich maschinelles Lernen.
+Du: quit
+```
+
+**Clean up audio files:**
+
+```bash
 python cleanup.py
 ```
 
@@ -133,6 +223,8 @@ TTS plays:         [Sentence 1 plays ▶]
 ```
 
 First audio plays after ~1-2 seconds instead of ~10.
+
+Sentence boundaries are detected with regex (`[.!?]\s`) on the incoming token stream. Each completed sentence is yielded by `agent.py` as a generator, and the caller (`main.py`) immediately sends it to TTS.
 
 ---
 

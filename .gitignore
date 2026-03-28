@@ -10,7 +10,7 @@ build/
 faq_database/
 *.sqlite3
 
-# Not published files
+# Savety storage during development
 hidden/
 
 # Models
