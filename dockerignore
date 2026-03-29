@@ -1,0 +1,15 @@
+.venv/
+.env
+.git/
+.gitignore
+__pycache__/
+*.pyc
+
+# Local-only audio files
+recordings/*.wav
+outputs/*.wav
+test_audio/
+
+# IDE
+.idea/
+.vscode/
