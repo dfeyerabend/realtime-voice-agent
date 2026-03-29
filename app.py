@@ -57,9 +57,9 @@ class RateLimiter:
         day_count = len(self.requests[ip])
 
         if hour_count >= self.max_per_hour:
-            return False, f"Stundenlimit erreicht ({self.max_per_hour}/h). Bitte warte etwas."
+            return False, f"Rate limit reached ({self.max_per_hour}/h). Please wait."
         if day_count >= self.max_per_day:
-            return False, f"Tageslimit erreicht ({self.max_per_day}/Tag)."
+            return False, f"Daily limit reached ({self.max_per_day}/day)."
         return True, ""
 
     def record(self, ip: str):
@@ -113,7 +113,7 @@ def process_turn(audio_filepath, chatbot, history, turn_count, request: gr.Reque
 
     # ── No audio recorded ─────────────────────────────────
     if audio_filepath is None:
-        chatbot = chatbot + [{"role": "assistant", "content": "Keine Aufnahme erkannt. Bitte erneut versuchen."}]
+        chatbot = chatbot + [{"role": "assistant", "content": "No audio detected. Please try again."}]
         yield chatbot, None, history, turn_count, None
         return
 
@@ -127,7 +127,7 @@ def process_turn(audio_filepath, chatbot, history, turn_count, request: gr.Reque
         user_text = stt.transcribe_to_text(audio_filepath)
     except Exception as e:
         logger.error(f"[{turn_label}] STT failed: {e}")
-        chatbot = chatbot + [{"role": "assistant", "content": f"Transkription fehlgeschlagen: {e}"}]
+        chatbot = chatbot + [{"role": "assistant", "content": f"Transcription failed: {e}"}]
         yield chatbot, None, history, turn_count, None
         return
 
@@ -193,38 +193,95 @@ def process_turn(audio_filepath, chatbot, history, turn_count, request: gr.Reque
     logger.info(f"[{turn_label}] complete — {len(history)} messages in history")
 
 
+# ── Custom CSS ────────────────────────────────────────────
+
+custom_css = """
+/* Header styling */
+.header-container {
+    text-align: center;
+    padding: 1rem 0 0.5rem 0;
+}
+.header-container h1 {
+    margin-bottom: 0.25rem;
+}
+.tech-stack {
+    font-size: 0.9rem;
+    opacity: 0.7;
+    margin-top: 0.25rem;
+}
+.author-line {
+    font-size: 0.85rem;
+    opacity: 0.6;
+    margin-top: 0.5rem;
+}
+.author-line a {
+    opacity: 0.8;
+}
+.how-to {
+    text-align: center;
+    font-size: 0.9rem;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+    border-radius: 8px;
+}
+
+/* Compact reset button */
+.reset-btn {
+    max-width: 200px;
+}
+
+/* Hide Gradio footer */
+footer {
+    display: none !important;
+}
+"""
+
+
 # ── Gradio UI ─────────────────────────────────────────────
 
-with gr.Blocks(title="Realtime Voice Agent") as demo:
+with gr.Blocks(title="Realtime Voice Agent", css=custom_css) as demo:
 
-    gr.Markdown(
-        "# 🎤 Realtime Voice Agent\n"
-        "Sprich etwas in das Mikrofon — der Agent antwortet in Echtzeit.\n\n"
-        "*Sage 'Stop' oder 'Ende' zum Beenden der Konversation.*"
-    )
+    # ── Header ────────────────────────────────────────────
+    gr.HTML("""
+        <div class="header-container">
+            <h1>🎤 Realtime Voice Agent</h1>
+            <p class="tech-stack">
+                Whisper STT → Claude Streaming → OpenAI TTS · Sentence-by-sentence audio streaming
+            </p>
+            <p class="how-to">
+                🔴 Click <strong>Record</strong> and ask something in German · Click <strong>Stop</strong> to send ·
+                The agent responds in real time, sentence by sentence
+            </p>
+            <p class="author-line">
+                Built by Dennis Feyerabend ·
+                <a href="https://github.com/dfeyerabend/realtime-voice-agent" target="_blank">GitHub ↗</a>
+            </p>
+        </div>
+    """)
 
     # Session state (per browser tab, managed by Gradio)
     history = gr.State(value=[])
     turn_count = gr.State(value=0)
 
     # Chatbot — accumulates full conversation with text + audio entries
-    chatbot = gr.Chatbot(label="Gespräch", height=500)
+    chatbot = gr.Chatbot(label="Conversation", height=450)
 
     with gr.Row():
         # Mic input — resets after each turn via None yield
         audio_input = gr.Audio(
             sources=["microphone"],
             type="filepath",
-            label="🎤 Deine Frage",
+            label="🎤 Your message",
         )
-        # Live streaming player — plays audio chunks as they arrive during a turn
+        # Live streaming player — plays TTS audio chunks as they arrive
         audio_output = gr.Audio(
-            label="🔊 Live-Wiedergabe",
+            label="🔊 Agent speaking…",
             streaming=True,
             autoplay=True,
         )
 
-    reset_btn = gr.Button("🔄 Neues Gespräch", variant="secondary")
+    with gr.Row():
+        reset_btn = gr.Button("🔄 New conversation", variant="secondary", elem_classes="reset-btn")
 
     # Reset: clear chatbot, history, turn counter, mic, and streaming player
     reset_btn.click(
