@@ -225,13 +225,6 @@ custom_css = """
     border-radius: 8px;
 }
 
-/* Reset button row — right-aligned */
-.reset-row {
-    display: flex;
-    justify-content: flex-end;
-    margin-bottom: 0.25rem;
-}
-
 /* Hide Gradio footer */
 footer {
     display: none !important;
@@ -265,9 +258,11 @@ with gr.Blocks(title="Realtime Voice Agent", css=custom_css) as demo:
     history = gr.State(value=[])
     turn_count = gr.State(value=0)
 
-    # Reset button — right-aligned above chat (scale=0 prevents expansion)
-    with gr.Row(elem_classes="reset-row"):
-        reset_btn = gr.Button("🔄 New conversation", variant="secondary", size="sm", scale=0, min_width=180)
+    # Reset button — right-aligned above chat via spacer column
+    with gr.Row():
+        gr.Column(scale=4)
+        with gr.Column(scale=1, min_width=180):
+            reset_btn = gr.Button("🔄 New conversation", variant="secondary", size="sm")
 
     # Chatbot — accumulates full conversation with text + audio entries
     chatbot = gr.Chatbot(label="Conversation", height=450)
