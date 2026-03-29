@@ -225,9 +225,15 @@ custom_css = """
     border-radius: 8px;
 }
 
-/* Compact reset button */
+/* Compact reset button — right-aligned above chat */
+.reset-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.25rem;
+}
 .reset-btn {
-    max-width: 200px;
+    max-width: 180px;
+    min-width: 0 !important;
 }
 
 /* Hide Gradio footer */
@@ -263,6 +269,10 @@ with gr.Blocks(title="Realtime Voice Agent", css=custom_css) as demo:
     history = gr.State(value=[])
     turn_count = gr.State(value=0)
 
+    # Reset button — right-aligned above chat
+    with gr.Row(elem_classes="reset-row"):
+        reset_btn = gr.Button("🔄 New conversation", variant="secondary", size="sm", elem_classes="reset-btn")
+
     # Chatbot — accumulates full conversation with text + audio entries
     chatbot = gr.Chatbot(label="Conversation", height=450)
 
@@ -279,9 +289,6 @@ with gr.Blocks(title="Realtime Voice Agent", css=custom_css) as demo:
             streaming=True,
             autoplay=True,
         )
-
-    with gr.Row():
-        reset_btn = gr.Button("🔄 New conversation", variant="secondary", elem_classes="reset-btn")
 
     # Reset: clear chatbot, history, turn counter, mic, and streaming player
     reset_btn.click(
