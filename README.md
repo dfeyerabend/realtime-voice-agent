@@ -216,7 +216,7 @@ docker run -p 8000:8000 --env-file .env realtime-voice-agent
 
 - **Live Demo:** [realtime-voice-agent-production.up.railway.app](https://realtime-voice-agent-production.up.railway.app/)
 - **API Docs:** [realtime-voice-agent-production.up.railway.app/api/docs](https://realtime-voice-agent-production.up.railway.app/api/docs)
-- **GitHub:** [github.com/DennisFeyworoth/realtime-voice-agent](https://github.com/DennisFeyworoth/realtime-voice-agent)
+- **GitHub:** [github.com/dfeyerabend/realtime-voice-agent](https://github.com/DennisFeyworoth/realtime-voice-agent)
 
 ---
 
