@@ -1,52 +1,106 @@
-# Realtime Voice Agent
+# 🎤 Realtime Voice Agent
 
-> A streaming voice conversation agent that listens, thinks, and speaks — built with Whisper STT, Claude, and OpenAI TTS in a real-time pipeline.
+A streaming voice conversation agent — speak into your browser, get an AI voice response in real time.
+
+Built with **Whisper STT → Claude Streaming → OpenAI TTS**, with sentence-by-sentence audio streaming for low perceived latency.
 
 **Showcase project** — built during the [Morphos GmbH](https://adz-weiterbildung.de) advanced AI engineering program (March 2026).
 
 ---
 
-## What This Is
+## Try It Live
 
-A voice-to-voice conversation system where three AI models work in sequence:
+**[▶ Open the Voice Agent](https://realtime-voice-agent-production.up.railway.app/)**
 
-**You speak → Whisper transcribes → Claude thinks → TTS speaks back**
+![Gradio UI Screenshot](docs/realtime-voice-agent_demo.png)
 
-The key feature is **streaming response**: instead of waiting for Claude's full answer before speaking, the agent speaks each sentence the moment it's complete — reducing perceived latency significantly.
+**How to use:**
+1. Click **Record** and ask something in German
+2. Click **Stop** to send your message
+3. The agent responds in real time — you'll hear each sentence as it's generated
+4. Say **"Stop"** or **"Ende"** to end the conversation
+5. Click **New conversation** to start fresh
 
-```
-Microphone
-    │
-    ▼
-┌───────────────────────────────┐
-│   Whisper STT (OpenAI API)    │  Audio → Text
-└──────────────┬────────────────┘
-               │
-               ▼
-┌───────────────────────────────┐
-│   Claude (Anthropic API)      │  Text → Text (Streaming via SSE)
-└──────────────┬────────────────┘
-               │  sentence by sentence
-               ▼
-┌───────────────────────────────┐
-│   TTS (OpenAI API)            │  Text → Audio → Playback
-└───────────────────────────────┘
-```
+The agent remembers context within a conversation — ask follow-up questions and it will reference what was said before.
 
 ---
 
-## Features
+## How It Works
 
-| Feature | Description |
-|---|---|
-| Streaming responses | Claude streams token by token; TTS fires per sentence |
-| Automatic mic calibration | Measures ambient noise before each turn, adapts silence threshold dynamically |
-| Silence detection | Two-phase state machine — waits for speech, then stops after configurable silence |
-| Leading silence trimming | Only speech audio is sent to Whisper, preventing hallucinations on empty input |
-| Conversation memory | Full conversation history is passed to Claude for follow-up questions |
-| Audio logging | Each turn is saved as numbered WAV files (`001_user.wav`, `001_agent.wav`) |
-| Pipeline timing | STT, LLM+TTS, and total latency measured per turn |
-| Verbose debug mode | `VERBOSE = True` in main.py reveals calibration values, file paths, stop-word checks |
+Three API calls in a pipeline per turn:
+
+```
+🎙 Browser Microphone
+       │
+       ▼
+┌─────────────────────────────┐
+│   Whisper STT (OpenAI API)  │  Audio → Text
+└──────────────┬──────────────┘
+               │
+               ▼
+┌─────────────────────────────┐
+│   Claude (Anthropic API)    │  Text → Text (streaming via SSE)
+│   Token by token            │
+└──────────────┬──────────────┘
+               │  Sentence boundary detected
+               ▼
+┌─────────────────────────────┐
+│   OpenAI TTS                │  Text → Audio (fired per sentence)
+└─────────────────────────────┘
+```
+
+### Sentence-by-Sentence Streaming
+
+This is the core optimization. Instead of waiting for Claude's full response before generating audio, each sentence is sent to TTS the moment it's complete:
+
+```
+Claude streams:  [Sentence 1 ......] [Sentence 2 ......] [Sentence 3 ......]
+TTS fires:       [▶ Sentence 1     ]
+                                     [▶ Sentence 2     ]
+                                                         [▶ Sentence 3     ]
+```
+
+First audio plays after **~1–2 seconds** instead of **~10 seconds** for a typical 3-sentence response.
+
+Sentence boundaries are detected via regex (`[.!?]\s`) on the incoming token stream. `agent.py` yields each completed sentence as a generator — the caller decides what to do with it (play audio, stream to browser, collect for API response).
+
+---
+
+## Architecture
+
+Four entry points share the same core modules:
+
+| Layer | File | Purpose |
+|---|---|---|
+| **Web UI** | `app.py` | Gradio — browser mic, session state, audio streaming |
+| **REST API** | `server.py` | FastAPI — stateless HTTP endpoints for testing + clients |
+| **CLI** | `main.py` | Local mic + speakers, direct module calls |
+| **Deployment** | `deploy.py` | Mounts Gradio + FastAPI on a single port for Railway |
+
+All entry points import the same modules (`stt.py`, `tts.py`, `agent.py`). The modules don't know who's calling them.
+
+---
+
+## REST API (FastAPI)
+
+The FastAPI server runs alongside Gradio on the same deployment and provides programmatic access to all pipeline steps.
+
+**Swagger UI:** [realtime-voice-agent-production.up.railway.app/api/docs](https://realtime-voice-agent-production.up.railway.app/api/docs)
+
+### Endpoints
+
+| Method | Path | Input | Output |
+|---|---|---|---|
+| GET | `/api/` | — | Welcome message + endpoint list |
+| GET | `/api/health` | — | Status, uptime, environment |
+| POST | `/api/tts` | JSON `{text}` | Raw WAV audio bytes |
+| POST | `/api/stt` | WAV file upload | JSON `{text}` |
+| POST | `/api/agent/text` | JSON `{text, history}` | JSON `{response, sentences, history}` |
+| POST | `/api/pipeline` | WAV file upload | JSON with transcription + agent response |
+
+The agent endpoint accepts and returns conversation history — stateless multi-turn (the client manages history). The pipeline endpoint runs the full STT → Agent → TTS chain in a single request.
+
+`deploy.py` handles the unified deployment: it creates a root FastAPI app, mounts `server.py` under `/api`, and mounts the Gradio demo at `/` — all on one port.
 
 ---
 
@@ -54,177 +108,26 @@ Microphone
 
 ```
 realtime-voice-agent/
-├── stt.py                  # Speech-to-Text (recording + Whisper)
-├── tts.py                  # Text-to-Speech (OpenAI TTS)
-├── agent.py                # Claude streaming (text only, no audio)
-├── main.py                 # CLI voice loop (orchestrates stt, tts, agent)
-├── config.py               # All model settings, audio parameters, prompts
-├── cleanup.py              # Utility: deletes all WAV files
+├── app.py                  # Gradio web UI (browser mic → streaming audio)
+├── server.py               # FastAPI REST API
+├── deploy.py               # Unified entrypoint: Gradio + FastAPI on one port
+├── main.py                 # CLI voice loop (local mic + speakers)
+├── stt.py                  # Speech-to-Text (Whisper API + mic recording)
+├── tts.py                  # Text-to-Speech (OpenAI TTS, in-memory audio)
+├── agent.py                # Claude streaming (yields sentences via generator)
+├── config.py               # Models, audio params, prompts, stop words
+├── cleanup.py              # Utility: deletes local WAV files
+├── Dockerfile              # Container setup for Railway deployment
+├── .dockerignore
 ├── requirements.txt
-├── .env                    # API keys (not tracked)
-├── .env_example            # Template for .env
-├── .gitignore
-├── recordings/             # User audio (per-turn WAV files)
-│   └── .gitkeep
-└── outputs/                # Agent audio (per-turn WAV files)
-    └── .gitkeep
+├── .env_example            # Template for API keys
+├── docs/
+│   └── screenshot.png      # Gradio UI screenshot
+├── recordings/             # CLI only: per-turn user audio
+└── outputs/                # CLI only: per-turn agent audio
 ```
 
-Each pipeline step is a standalone module that can be tested independently.
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.12+
-- A working microphone
-- API keys for OpenAI and Anthropic
-
-### Installation
-
-```bash
-git clone https://github.com/yourusername/realtime-voice-agent.git
-cd realtime-voice-agent
-
-python -m venv .venv
-source .venv/bin/activate       # macOS/Linux
-.venv\Scripts\activate          # Windows
-
-pip install -r requirements.txt
-```
-
-### Environment Setup
-
-```bash
-cp .env_example .env
-```
-
-Add your API keys to `.env`:
-
-```
-OPENAI_API_KEY=sk-...
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
----
-
-## Usage
-
-### Full Voice Agent
-
-```bash
-python main.py
-```
-
-Speak into your microphone. The agent responds via audio. Say "stop" or "ende" to end the conversation.
-
-Expected output:
-
-```
-═══════════════════════════════════════
-  Voice Agent
-  Sage 'stop' oder 'ende' zum Beenden
-═══════════════════════════════════════
-
-🎤 Bitte sprechen...
-Du:     Erzähle mir eine Geschichte über eine kosmische Eule.
-
-Agent:
-  Im weiten Universum lebte eine magische Eule namens Stella...
-  Sie flog zwischen den Galaxien umher und sammelte Träume...
-  Eines Nachts entdeckte sie einen einsamen Asteroiden...
-
-  ⏱ STT: 1.5s | LLM+TTS: 34.3s | Total: 35.8s
-
-🎤 Bitte sprechen...
-Du:     Ende.
-
-👋 Tschüss!
-Gespräch beendet. 1 Austausche.
-```
-
-Set `VERBOSE = True` in main.py to see debug details (calibration values, file paths, stop-word matching).
-
-### Test Individual Pipeline Steps
-
-Each module runs standalone for isolated testing:
-
-**Speech-to-Text only** — records from microphone, transcribes, prints text:
-
-```bash
-python stt.py
-```
-
-```
-=== STT Test ===
-
-  ⚙ max 20s, Stille-Timeout 2s
-  ⚙ Kalibriere Mikrofon... Ambient: 0.0141, Threshold: 0.0281
-🎤 Bitte sprechen...
-  ⚙ Stille erkannt nach 5.2s
-  ⚙ Gespeichert: ./recordings/999_user.wav
-
-Transkription: Das ist ein Test.
-```
-
-Note: stt.py runs with `verbose=True` by default for debugging.
-
-**Text-to-Speech only** — generates and plays a test sentence:
-
-```bash
-python tts.py
-```
-
-```
-=== TTS Test ===
-
-Generiere Audio...
-Fertig.
-```
-
-You should hear "Hallo, ich bin der Voice Agent. Das ist ein Test." through your speakers.
-
-**Claude streaming only** — text chat in the terminal, no audio:
-
-```bash
-python agent.py
-```
-
-```
-=== Agent Test: Text-Chat mit Claude ===
-Tippe 'quit' zum Beenden.
-
-Du: Was ist Python?
-Agent: Python ist eine vielseitige Programmiersprache. Sie wird häufig in der Webentwicklung und Datenanalyse eingesetzt. Besonders beliebt ist sie auch im Bereich maschinelles Lernen.
-Du: quit
-```
-
-**Clean up audio files:**
-
-```bash
-python cleanup.py
-```
-
----
-
-## How Streaming Works
-
-The non-streaming approach waits for Claude's complete response before sending it to TTS — a 3-sentence answer takes ~5-10 seconds before any audio plays.
-
-The streaming approach sends each sentence to TTS the moment it's complete:
-
-```
-Claude generates:  [Sentence 1 ......] [Sentence 2 ......] [Sentence 3 ......]
-TTS plays:         [Sentence 1 plays ▶]
-                                       [Sentence 2 plays ▶]
-                                                           [Sentence 3 plays ▶]
-```
-
-First audio plays after ~1-2 seconds instead of ~10.
-
-Sentence boundaries are detected with regex (`[.!?]\s`) on the incoming token stream. Each completed sentence is yielded by `agent.py` as a generator, and the caller (`main.py`) immediately sends it to TTS.
+Each pipeline module (`stt.py`, `tts.py`, `agent.py`) has its own `if __name__ == "__main__"` block for independent testing.
 
 ---
 
@@ -232,19 +135,88 @@ Sentence boundaries are detected with regex (`[.!?]\s`) on the incoming token st
 
 | Technology | Purpose |
 |---|---|
-| **Anthropic API** | Agent reasoning (Claude Sonnet 4, streaming via SSE) |
-| **OpenAI Whisper API** | Speech-to-text transcription |
-| **OpenAI TTS API** | Text-to-speech synthesis |
-| **sounddevice** | Microphone recording and audio playback |
-| **soundfile** | WAV file I/O |
+| **Anthropic Claude** | Agent reasoning (Claude Sonnet 4, streaming via SSE) |
+| **OpenAI Whisper** | Speech-to-text transcription |
+| **OpenAI TTS** | Text-to-speech synthesis (voice: nova) |
+| **Gradio** | Browser-based voice UI with audio streaming |
+| **FastAPI** | REST API with auto-generated Swagger docs |
+| **Docker** | Containerized deployment |
+| **Railway** | Cloud hosting |
+| **sounddevice** | Local mic recording + audio playback (CLI) |
 | **Python 3.12** | Runtime |
+
+---
+
+## Local Development
+
+### Prerequisites
+
+- Python 3.12+
+- API keys for [OpenAI](https://platform.openai.com/) and [Anthropic](https://console.anthropic.com/)
+- A microphone (for CLI mode)
+
+### Setup
+
+```bash
+git clone https://github.com/DennisFeyworoth/realtime-voice-agent.git
+cd realtime-voice-agent
+
+python -m venv .venv
+source .venv/bin/activate       # macOS/Linux
+.venv\Scripts\activate          # Windows
+
+pip install -r requirements.txt
+cp .env_example .env            # Add your API keys
+```
+
+### Run the Gradio UI locally
+
+```bash
+python app.py                   # → http://localhost:7860
+```
+
+### Run Gradio + FastAPI together (same as deployment)
+
+```bash
+python deploy.py                # → http://localhost:8000 (UI + /api/docs)
+```
+
+### Run the CLI voice agent
+
+```bash
+python main.py
+```
+
+Speak into your microphone. The agent responds through your speakers. Say "stop" or "ende" to exit.
+
+### Test individual modules
+
+```bash
+python stt.py          # Record from mic → transcribe → print text
+python tts.py          # Generate + play a test sentence
+python agent.py        # Text chat with Claude in the terminal
+```
+
+### Docker
+
+```bash
+docker build -t realtime-voice-agent .
+docker run -p 8000:8000 --env-file .env realtime-voice-agent
+```
 
 ---
 
 ## Author
 
-**Dennis Feyerabend**
-March 2026
+**Dennis Feyerabend** · March 2026
+
+---
+
+## Links
+
+- **Live Demo:** [realtime-voice-agent-production.up.railway.app](https://realtime-voice-agent-production.up.railway.app/)
+- **API Docs:** [realtime-voice-agent-production.up.railway.app/api/docs](https://realtime-voice-agent-production.up.railway.app/api/docs)
+- **GitHub:** [github.com/DennisFeyworoth/realtime-voice-agent](https://github.com/DennisFeyworoth/realtime-voice-agent)
 
 ---
 
