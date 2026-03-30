@@ -73,7 +73,7 @@ Four entry points share the same core modules:
 | Layer | File | Purpose |
 |---|---|---|
 | **Web UI** | `app.py` | Gradio — browser mic, session state, audio streaming |
-| **REST API** | `server.py` | FastAPI — stateless HTTP endpoints for testing + clients |
+| **API** | `server.py` | FastAPI — stateless HTTP endpoints for testing + clients |
 | **CLI** | `main.py` | Local mic + speakers, direct module calls |
 | **Deployment** | `deploy.py` | Mounts Gradio + FastAPI on a single port for Railway |
 
@@ -81,7 +81,7 @@ All entry points import the same modules (`stt.py`, `tts.py`, `agent.py`). The m
 
 ---
 
-## REST API (FastAPI)
+## API (FastAPI)
 
 The FastAPI server runs alongside Gradio on the same deployment and provides programmatic access to all pipeline steps.
 
@@ -109,7 +109,7 @@ The agent endpoint accepts and returns conversation history — stateless multi-
 ```
 realtime-voice-agent/
 ├── app.py                  # Gradio web UI (browser mic → streaming audio)
-├── server.py               # FastAPI REST API
+├── server.py               # FastAPI API
 ├── deploy.py               # Unified entrypoint: Gradio + FastAPI on one port
 ├── main.py                 # CLI voice loop (local mic + speakers)
 ├── stt.py                  # Speech-to-Text (Whisper API + mic recording)
@@ -139,7 +139,7 @@ Each pipeline module (`stt.py`, `tts.py`, `agent.py`) has its own `if __name__ =
 | **OpenAI Whisper** | Speech-to-text transcription |
 | **OpenAI TTS** | Text-to-speech synthesis (voice: nova) |
 | **Gradio** | Browser-based voice UI with audio streaming |
-| **FastAPI** | REST API with auto-generated Swagger docs |
+| **FastAPI** | API with auto-generated Swagger docs |
 | **Docker** | Containerized deployment |
 | **Railway** | Cloud hosting |
 | **sounddevice** | Local mic recording + audio playback (CLI) |
